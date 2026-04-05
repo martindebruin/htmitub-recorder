@@ -8,6 +8,8 @@ Android app for recording outdoor runs and syncing them to the HTMITUB running b
 - Pause / resume support
 - Background sync to the HTMITUB backend via bearer token auth
 - Run history with sync status indicators
+- Tap a synced run to attach a photo (gallery or camera)
+- Auto-generated Swedish run titles (reverse geocoded location + time of day + LLM)
 
 ## Setup
 
@@ -35,3 +37,4 @@ Enable USB debugging on your phone, connect via USB, then:
 
 - Android 8.0+ (API 26)
 - Location permission (required for GPS recording)
+- Camera permission (required for taking run photos)
