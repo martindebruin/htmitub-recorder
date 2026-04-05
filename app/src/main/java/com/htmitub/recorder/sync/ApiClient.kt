@@ -5,9 +5,11 @@ import com.htmitub.recorder.db.Run
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.IOException
 import java.time.Instant
 import java.util.concurrent.TimeUnit
@@ -23,7 +25,8 @@ fun buildRunPayload(run: Run): String = buildString {
     append("\"avg_speed_ms\":${run.avgSpeedMs},")
     append("\"start_lat\":${run.startLat},")
     append("\"start_lng\":${run.startLng},")
-    append("\"summary_polyline\":\"${run.summaryPolyline}\",")
+    append("\"summary_polyline\":\"${run.summaryPolyline.replace("\\", "\\\\")}\",")
+
     append("\"splits\":${run.splitsJson}")
     append("}")
 }
@@ -46,6 +49,26 @@ class ApiClient {
             if (!response.isSuccessful) {
                 throw IOException("Upload failed: HTTP ${response.code}")
             }
+        }
+    }
+
+    suspend fun uploadPhoto(appRunId: String, imageBytes: ByteArray): String = withContext(Dispatchers.IO) {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("photo", "$appRunId.jpg",
+                imageBytes.toRequestBody("image/jpeg".toMediaType()))
+            .build()
+        val request = Request.Builder()
+            .url("${BuildConfig.SERVER_URL}/api/run/$appRunId/photo")
+            .addHeader("Authorization", "Bearer ${BuildConfig.BEARER_TOKEN}")
+            .post(body)
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("Photo upload failed: HTTP ${response.code}")
+            }
+            val json = JSONObject(response.body?.string() ?: "{}")
+            json.optString("asset_url") ?: throw IOException("No asset_url in response")
         }
     }
 }

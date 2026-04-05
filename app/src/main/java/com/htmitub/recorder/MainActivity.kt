@@ -1,21 +1,36 @@
 package com.htmitub.recorder
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import coil.load
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.htmitub.recorder.databinding.ActivityMainBinding
 import com.htmitub.recorder.db.Run
 import com.htmitub.recorder.db.RunDatabase
+import com.htmitub.recorder.sync.ApiClient
 import com.htmitub.recorder.sync.SyncWorker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -24,16 +39,29 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: RunAdapter
+    private lateinit var galleryLauncher: ActivityResultLauncher<String>
+    private lateinit var cameraLauncher: ActivityResultLauncher<Uri>
+    private var cameraUri: Uri? = null
+    private var selectedRun: Run? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        galleryLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            uri ?: return@registerForActivityResult
+            handlePhotoSelected(uri)
+        }
+        cameraLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+            if (success) cameraUri?.let { handlePhotoSelected(it) }
+        }
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        adapter = RunAdapter(onUploadClick = {
-            // SyncWorker already picks up failed runs — just trigger it
-            SyncWorker.enqueue(this@MainActivity)
-        })
+        adapter = RunAdapter(
+            onUploadClick = { SyncWorker.enqueue(this@MainActivity) },
+            onRunClick = { run -> showPhotoDialog(run) },
+        )
 
         binding.rvRuns.layoutManager = LinearLayoutManager(this)
         binding.rvRuns.addItemDecoration(DividerItemDecoration(this, DividerItemDecoration.VERTICAL))
@@ -47,7 +75,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         loadRuns()
-        SyncWorker.enqueue(this) // Auto-sync pending runs on app open
+        SyncWorker.enqueue(this)
     }
 
     private fun loadRuns() {
@@ -56,10 +84,66 @@ class MainActivity : AppCompatActivity() {
             adapter.submitList(runs)
         }
     }
+
+    private fun showPhotoDialog(run: Run) {
+        selectedRun = run
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Lägg till foto")
+            .setItems(arrayOf("Välj från galleri", "Ta foto")) { _, which ->
+                when (which) {
+                    0 -> galleryLauncher.launch("image/*")
+                    1 -> {
+                        val tmpFile = File.createTempFile("photo_", ".jpg", cacheDir)
+                        cameraUri = FileProvider.getUriForFile(this, "$packageName.fileprovider", tmpFile)
+                        cameraLauncher.launch(cameraUri!!)
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun handlePhotoSelected(uri: Uri) {
+        val run = selectedRun ?: return
+        lifecycleScope.launch {
+            try {
+                val imageBytes = withContext(Dispatchers.IO) { compressImage(uri) }
+                val assetUrl = ApiClient().uploadPhoto(run.id, imageBytes)
+                RunDatabase.getInstance(this@MainActivity).runDao().updatePhotoUrl(run.id, assetUrl)
+                loadRuns()
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Foto kunde inte laddas upp", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun compressImage(uri: Uri): ByteArray {
+        val inputStream = contentResolver.openInputStream(uri)!!
+        val original = BitmapFactory.decodeStream(inputStream)
+        inputStream.close()
+        val maxDim = 1200
+        val scale = maxDim.toFloat() / maxOf(original.width, original.height)
+        val bitmap = if (scale < 1f) {
+            Bitmap.createScaledBitmap(
+                original,
+                (original.width * scale).toInt(),
+                (original.height * scale).toInt(),
+                true,
+            )
+        } else {
+            original
+        }
+        val out = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
+        if (bitmap !== original) bitmap.recycle()
+        original.recycle()
+        return out.toByteArray()
+    }
 }
 
-class RunAdapter(private val onUploadClick: () -> Unit) :
-    RecyclerView.Adapter<RunAdapter.ViewHolder>() {
+class RunAdapter(
+    private val onUploadClick: () -> Unit,
+    private val onRunClick: (Run) -> Unit,
+) : RecyclerView.Adapter<RunAdapter.ViewHolder>() {
 
     private var runs: List<Run> = emptyList()
 
@@ -73,19 +157,21 @@ class RunAdapter(private val onUploadClick: () -> Unit) :
         val tvStats: TextView = view.findViewById(R.id.tvStats)
         val tvSyncStatus: TextView = view.findViewById(R.id.tvSyncStatus)
         val btnUpload: MaterialButton = view.findViewById(R.id.btnUpload)
+        val ivPhoto: ImageView = view.findViewById(R.id.ivPhoto)
 
         init {
             btnUpload.setOnClickListener { onUploadClick() }
+            itemView.setOnClickListener {
+                val run = runs.getOrNull(bindingAdapterPosition) ?: return@setOnClickListener
+                if (run.syncStatus == "synced") onRunClick(run)
+            }
         }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val view = layoutInflater(parent).inflate(R.layout.item_run, parent, false)
+        val view = android.view.LayoutInflater.from(parent.context).inflate(R.layout.item_run, parent, false)
         return ViewHolder(view)
     }
-
-    private fun layoutInflater(parent: ViewGroup) =
-        android.view.LayoutInflater.from(parent.context)
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val run = runs[position]
@@ -98,6 +184,13 @@ class RunAdapter(private val onUploadClick: () -> Unit) :
         } else "—"
         holder.tvStats.text = "$distKm · $avgPace"
 
+        if (run.photoUrl != null) {
+            holder.ivPhoto.visibility = View.VISIBLE
+            holder.ivPhoto.load(run.photoUrl)
+        } else {
+            holder.ivPhoto.visibility = View.GONE
+        }
+
         when (run.syncStatus) {
             "synced" -> {
                 holder.tvSyncStatus.text = "✓"
@@ -109,7 +202,7 @@ class RunAdapter(private val onUploadClick: () -> Unit) :
                 holder.tvSyncStatus.setTextColor(0xFFC0392B.toInt())
                 holder.btnUpload.visibility = View.VISIBLE
             }
-            else -> { // pending
+            else -> {
                 holder.tvSyncStatus.text = "…"
                 holder.tvSyncStatus.setTextColor(0xFF888888.toInt())
                 holder.btnUpload.visibility = View.GONE

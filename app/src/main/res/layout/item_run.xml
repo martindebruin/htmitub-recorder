@@ -25,6 +25,15 @@
             android:textSize="13sp" />
     </LinearLayout>
 
+    <ImageView
+        android:id="@+id/ivPhoto"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="center_vertical"
+        android:layout_marginEnd="8dp"
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
     <TextView
         android:id="@+id/tvSyncStatus"
         android:layout_width="wrap_content"

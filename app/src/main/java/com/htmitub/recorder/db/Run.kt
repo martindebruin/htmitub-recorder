@@ -16,4 +16,5 @@ data class Run(
     val summaryPolyline: String,
     val splitsJson: String,    // JSON array string
     val syncStatus: String,    // "pending" | "synced" | "failed"
+    val photoUrl: String? = null,
 )

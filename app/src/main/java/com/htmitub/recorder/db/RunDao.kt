@@ -25,6 +25,9 @@ interface RunDao {
     @Query("UPDATE runs SET syncStatus = 'failed' WHERE id = :id")
     suspend fun markFailed(id: String)
 
+    @Query("UPDATE runs SET photoUrl = :url WHERE id = :id")
+    suspend fun updatePhotoUrl(id: String, url: String)
+
     @Insert
     suspend fun insertTrackPoint(point: TrackPoint)
 
