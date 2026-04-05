@@ -1,0 +1,19 @@
+# Local configuration (contains SDK path and secrets)
+local.properties
+
+# Gradle
+.gradle/
+build/
+app/build/
+gradle-8.4/
+gradle-8.4-bin.zip
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# OS
+.DS_Store
+Thumbs.db

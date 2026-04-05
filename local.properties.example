@@ -1,0 +1,5 @@
+# Copy this file to local.properties and fill in your values.
+# local.properties is gitignored — never commit it.
+sdk.dir=/path/to/your/Android/Sdk
+server_url=https://your-domain.com
+bearer_token=your-app-bearer-token
